@@ -14,9 +14,8 @@ const (
 	// maxAlignmentForce = 1
 	// MaxCohesiveFroce = 1
 	// maxSeprationForce = 1
-	NumberofSpeices = 5
 	radius = 2
-	numberOfPaticles = 100
+	numberOfPaticles = 1000
 	boidPerQT = 1
 )
 
@@ -24,7 +23,7 @@ var maxAlignmentForce float32 = float32(0.5) // Initial slider value
 var MaxCohesiveFroce float32= float32(0.5) // Initial slider value
 var maxSeprationForce float32= float32(0.5) // Initial slider value
 var perception float32 = 2
-var FOV float32 = 20.0 
+var FOV float32 = 360.0 
 func main() {	// Initialize window
 	
 
@@ -99,7 +98,14 @@ func draw(flock []*boid) {
 		1.0, 
 		600.0,
 	)
-
+	FOV = gui.Slider(
+		rl.NewRectangle(600, 80, 200, 20),
+		"FOV", 
+		"", 
+		FOV, 
+		1.0, 
+		360.0,
+	)
 	for _,boid := range flock{
 		rl.DrawCircle(int32(boid.position.X),int32(boid.position.Y),float32(radius),rl.Black)
 	}

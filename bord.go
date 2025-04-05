@@ -174,7 +174,6 @@ func (b *boid) seprativeForce(flock []*boid) r3.Vector{
 
 	desired := r3.NewPreciseVector(0,0,0).Vector()
 	steer := r3.NewPreciseVector(0,0,0).Vector()
-	
 	count := 0
 	for _,other := range flock{
 		if other != b && b.position.Distance(other.position) <= float64(perception){
