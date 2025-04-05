@@ -182,7 +182,6 @@ func (qt *qtNode) update() {
 			root.Insert(b)
 		}
 	}
-
 	// Update children recursively
 	if qt.divided {
 		qt.NE.update()

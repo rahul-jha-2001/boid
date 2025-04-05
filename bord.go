@@ -81,27 +81,27 @@ func  (b *boid) edge(ScreenWidth,screenHeight int){
 	}
 }
 
-// func populate(number int,MaxHeight float64,MaxWidth float64) []*boid{
-// 	population := make([]*boid, number)
-// 	for i := 0; i < number; i++ {
-// 		population[i] = Newboid(MaxHeight, MaxWidth)
-// 	}
-// 	return population
-// }
-
-
-func populate(number int,MaxHeight float64,MaxWidth float64) *qtNode{
-	root := createNode(boundary{
-		x1 : 0,
-		x2 :int(MaxWidth),
-		y1 :0,
-		y2 :int(MaxHeight),
-	})
+func populate(number int,MaxHeight float64,MaxWidth float64) []*boid{
+	population := make([]*boid, number)
 	for i := 0; i < number; i++ {
-		root.Insert(Newboid(MaxHeight, MaxWidth))
+		population[i] = Newboid(MaxHeight, MaxWidth)
 	}
-	return root
+	return population
 }
+
+
+// func populate(number int,MaxHeight float64,MaxWidth float64) *qtNode{
+// 	root := createNode(boundary{
+// 		x1 : 0,
+// 		x2 :int(MaxWidth),
+// 		y1 :0,
+// 		y2 :int(MaxHeight),
+// 	})
+// 	for i := 0; i < number; i++ {
+// 		root.Insert(Newboid(MaxHeight, MaxWidth))
+// 	}
+// 	return root
+// }
 
 func (b *boid) checkNode() bool{
 	return b.curr_node.boundary.contains(int(b.position.X),int(b.position.Y))

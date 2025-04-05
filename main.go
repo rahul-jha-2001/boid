@@ -34,7 +34,7 @@ func main() {	// Initialize window
 	// Set FPS
 	rl.SetTargetFPS(60)
 	sim_start := false
-	flock_root :=  populate(numberOfPaticles,screenHeight,screenWidth)
+	flock :=  populate(numberOfPaticles,screenHeight,screenWidth)
 	// Game loop
 	for !rl.WindowShouldClose() {
 		// Update game logic
@@ -44,12 +44,10 @@ func main() {	// Initialize window
 		}
 		
 		if sim_start{
-		update(flock_root)
-		}
-		// Draw everything
+		update(flock)}
 		rl.BeginDrawing()
 		rl.ClearBackground(rl.RayWhite)
-		draw(flock_root)
+		draw(flock)
 		rl.EndDrawing()
 	}
 }
@@ -57,20 +55,17 @@ func main() {	// Initialize window
 
 
 // Update game logic
-func update(qt *qtNode) {
+func update(flock []*boid) {
 
-	// for _,boid := range flock{
-	// 	boid.flock(flock)
-	// 	boid.Update()
+	for _,boid := range flock{
+		boid.flock(flock)
+		boid.Update()
 		
-	// }
-	qt.update()
-
-	
+	}
 }
 
 // Draw everything
-func draw(flock *qtNode) {
+func draw(flock []*boid) {
 	rl.DrawFPS(0,0)
 	maxAlignmentForce = gui.Slider(
 		rl.NewRectangle(600, 0, 200, 20),
@@ -104,9 +99,10 @@ func draw(flock *qtNode) {
 		1.0, 
 		600.0,
 	)
-	flock.Draw()
-	
-	
+
+	for _,boid := range flock{
+		rl.DrawCircle(int32(boid.position.X),int32(boid.position.Y),float32(radius),rl.Black)
+	}
 
 }
 
