@@ -16,7 +16,7 @@ const (
 	// maxSeprationForce = 1
 	radius = 2
 	numberOfPaticles = 1000
-	boidPerQT = 1
+	boidPerQT = 10
 )
 
 var maxAlignmentForce float32 = float32(0.5) // Initial slider value
@@ -33,7 +33,8 @@ func main() {	// Initialize window
 	// Set FPS
 	rl.SetTargetFPS(60)
 	sim_start := false
-	flock :=  populate(numberOfPaticles,screenHeight,screenWidth)
+	// flock :=  populate(numberOfPaticles,screenHeight,screenWidth)
+	flock_root := qt_populate(numberOfPaticles,screenHeight,screenWidth)
 	// Game loop
 	for !rl.WindowShouldClose() {
 		// Update game logic
@@ -43,10 +44,13 @@ func main() {	// Initialize window
 		}
 		
 		if sim_start{
-		update(flock)}
+		// update(flock)
+		update_qt(flock_root)
+	}
 		rl.BeginDrawing()
 		rl.ClearBackground(rl.RayWhite)
-		draw(flock)
+		// draw(flock)
+		draw_qt(flock_root)
 		rl.EndDrawing()
 	}
 }
@@ -61,6 +65,9 @@ func update(flock []*boid) {
 		boid.Update()
 		
 	}
+}
+func update_qt(qt *qtNode){
+	qt.update()
 }
 
 // Draw everything
@@ -112,3 +119,48 @@ func draw(flock []*boid) {
 
 }
 
+func draw_qt(qt *qtNode) {
+	rl.DrawFPS(0,0)
+	maxAlignmentForce = gui.Slider(
+		rl.NewRectangle(600, 0, 200, 20),
+		"maxAlignmentForce", 
+		"", 
+		maxAlignmentForce, 
+		0.0, 
+		1.0,
+	)
+	MaxCohesiveFroce = gui.Slider(
+		rl.NewRectangle(600, 20, 200, 20),
+		"MaxCohesiveFroce", 
+		"", 
+		MaxCohesiveFroce, 
+		0.0, 
+		1.0,
+	)
+	maxSeprationForce = gui.Slider(
+		rl.NewRectangle(600, 40, 200, 20),
+		"maxSeprationForce", 
+		"", 
+		maxSeprationForce, 
+		0.0, 
+		1.0,
+	)
+	perception = gui.Slider(
+		rl.NewRectangle(600, 60, 200, 20),
+		"perception", 
+		"", 
+		perception, 
+		1.0, 
+		600.0,
+	)
+	FOV = gui.Slider(
+		rl.NewRectangle(600, 80, 200, 20),
+		"FOV", 
+		"", 
+		FOV, 
+		1.0, 
+		360.0,
+	)
+	qt.Draw()
+
+}

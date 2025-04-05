@@ -32,7 +32,7 @@ func createNode(b boundary) *qtNode {
 
 func (b boundary) contains(x, y int) bool {
 	return x >= b.x1 && x <= b.x2 &&
-		y >= b.x1 && y <= b.y2
+		y >= b.y1 && y <= b.y2 // Fixed: using y1 instead of x1
 }
 
 func (b boundary) dimensions() (width, height int) {
@@ -138,49 +138,23 @@ func (qt *qtNode) Draw() {
 
 	// Draw points in a batch
 	for _, p := range qt.flock {
-		rl.DrawCircleV(rl.Vector2{X: float32(p.position.X), Y: float32(p.position.Y)}, 2, rl.Red)
+		rl.DrawCircle(int32(p.position.X),int32(p.position.Y), 2, rl.Red)
 	}
 
 	// Draw children recursively
 	if qt.divided {
-		if qt.NE != nil {
-			qt.NE.Draw()
-		}
-		if qt.NW != nil {
-			qt.NW.Draw()
-		}
-		if qt.SE != nil {
-			qt.SE.Draw()
-		}
-		if qt.SW != nil {
-			qt.SW.Draw()
-		}
+		qt.NE.Draw()
+		qt.NW.Draw()
+		qt.SE.Draw()
+		qt.SW.Draw()
 	}
 }
+
 func (qt *qtNode) update() {
-	// Update all boids in current node
-	snapshot := DeepCopyBoids(qt.flock)
+	// Update all boids in current nod
 	for _, b := range qt.flock {
-		// Store old position for boundary check
-		// oldX, oldY := b.position.X, b.position.Y
-
-		
-		// Update boid behavior and position
-		b.flock(snapshot)
+		b.flock(qt.flock)
 		b.Update()
-
-		// Check if boid moved outside current boundary
-		if b.checkNode() {
-			// Remove from current node
-			qt.removeBoid(b)
-
-			// Reinsert into root node
-			root := qt
-			for root.parent != nil {
-				root = root.parent
-			}
-			root.Insert(b)
-		}
 	}
 	// Update children recursively
 	if qt.divided {
@@ -200,13 +174,11 @@ func (qt *qtNode) update() {
 func (qt *qtNode) removeBoid(b *boid) {
 	for i, boid := range qt.flock {
 		if boid == b {
-			// Remove boid by swapping with last element and truncating
 			qt.flock[i] = qt.flock[len(qt.flock)-1]
 			qt.flock = qt.flock[:len(qt.flock)-1]
 			return
 		}
 	}
-
 }
 
 // Check if node and all children are empty
@@ -223,9 +195,45 @@ func (qt *qtNode) isEmpty() bool {
 
 // Merge empty subdivisions
 func (qt *qtNode) merge() {
+	// Clear parent references before nulling
+	if qt.NE != nil {
+		qt.NE.parent = nil
+		qt.NE = nil
+	}
+	if qt.NW != nil {
+		qt.NW.parent = nil
+		qt.NW = nil
+	}
+	if qt.SE != nil {
+		qt.SE.parent = nil
+		qt.SE = nil
+	}
+	if qt.SW != nil {
+		qt.SW.parent = nil
+		qt.SW = nil
+	}
+	qt.divided = false
+	qt.flock = make([]*boid, 0) // Reset flock slice
+}
+
+func (qt *qtNode) Cleanup() {
+	if qt == nil {
+		return
+	}
+
+	// Cleanup children first
+	if qt.divided {
+		qt.NE.Cleanup()
+		qt.NW.Cleanup()
+		qt.SE.Cleanup()
+		qt.SW.Cleanup()
+	}
+
+	// Clear all references
+	qt.flock = nil
 	qt.NE = nil
 	qt.NW = nil
 	qt.SE = nil
 	qt.SW = nil
-	qt.divided = false
+	qt.parent = nil
 }
