@@ -53,43 +53,48 @@ func Newboid(MaxHeight float64,MaxWidth float64) *boid{
 }
 
 func (b *boid) Update() {
-	b.edge(screenWidth,screenHeight)
-	b.position = b.position.Add(b.velocity)
-	b.velocity = b.velocity.Add(b.accelration)
-	speed := b.velocity.Norm()
+    b.position = b.position.Add(b.velocity)
+    b.velocity = b.velocity.Add(b.accelration)
+    speed := b.velocity.Norm()
+    b.edge(screenWidth, screenHeight)
+
     if speed > maxVelocity {
         b.velocity = b.velocity.Mul(maxVelocity / speed)
     }
-	if !b.checkNode() {
-		// Remove from current node
-		root := b.curr_node
-		b.curr_node.removeBoid(b)
 
-		for root.parent != nil && !root.parent.boundary.contains(int(b.position.X),int(b.position.Y)) {
-			root = root.parent
-		}
-		root.Insert(b)
-	}
+    if !b.checkNode() {
+        // Remove from the old leaf
+        oldLeaf := b.curr_node
+        oldLeaf.removeBoid(b)
+
+        // Climb up until `node.boundary` contains the boid
+        node := oldLeaf
+        for node != nil && !node.boundary.contains(int(b.position.X), int(b.position.Y)) {
+            node = node.parent
+        }
+
+        // Re‐insert at the correct ancestor
+        if node != nil {
+            node.Insert(b)
+        }
+    }
 }
 
-func  (b *boid) edge(ScreenWidth,screenHeight int){
-
-	Width := float64(ScreenWidth)
-	Height := float64(screenHeight)
-	if b.position.X > Width{
-		b.position.X = 0
-	}
-	if b.position.X < 0{
-		b.position.X = Width
-	}
-	if b.position.Y > Height{
-		b.position.Y = 0
-	}
-	if b.position.Y < 0{
-		b.position.Y = Height
-	}
+func wrap(value, max float64) float64 {
+    value = math.Mod(value, max)
+    if value < 0 {
+        value += max
+    }
+    return value
 }
 
+func (b *boid) edge(screenWidth, screenHeight int) {
+    width := float64(screenWidth)
+    height := float64(screenHeight)
+
+    b.position.X = wrap(b.position.X, width)
+    b.position.Y = wrap(b.position.Y, height)
+}
 func populate(number int,MaxHeight float64,MaxWidth float64) []*boid{
 	population := make([]*boid, number)
 	for i := 0; i < number; i++ {

@@ -31,8 +31,7 @@ func createNode(b boundary) *qtNode {
 }
 
 func (b boundary) contains(x, y int) bool {
-	return x >= b.x1 && x <= b.x2 &&
-		y >= b.y1 && y <= b.y2 // Fixed: using y1 instead of x1
+	return x >= b.x1 && x < b.x2 && y >= b.y1 && y < b.y2
 }
 
 func (b boundary) dimensions() (width, height int) {
