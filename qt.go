@@ -4,10 +4,6 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-type boundary struct {
-	x1, y1 int // top-left corner
-	x2, y2 int // bottom-right corner
-}
 
 type qtNode struct {
 	boundary       boundary
@@ -30,17 +26,7 @@ func createNode(b boundary) *qtNode {
 	}
 }
 
-func (b boundary) contains(x, y int) bool {
-	return x >= b.x1 && x < b.x2 && y >= b.y1 && y < b.y2
-}
 
-func (b boundary) dimensions() (width, height int) {
-	return b.x2 - b.x1, b.y2 - b.y1
-}
-
-func (b boundary) center() (width, height int) {
-	return b.x2 / 2, b.y2 / 2
-}
 
 func (qt *qtNode) Insert(b *boid) bool {
 	// First, check if the point is within boundary
@@ -149,9 +135,33 @@ func (qt *qtNode) Draw() {
 	}
 }
 
+
+func (qt *qtNode) query() []*boid {
+
+	flock := make([]*boid, 0)
+
+	// Check if current node's boundary intersects with the query area
+	for _, b := range qt.flock {
+		if qt.boundary.contains(int(b.position.X), int(b.position.Y))  {
+			flock = append(flock, b)
+		}
+	}
+
+	// If subdivided, check children recursively
+	if qt.divided {
+		flock = append(flock, qt.NE.query()...)
+		flock = append(flock, qt.NW.query()...)
+		flock = append(flock, qt.SE.query()...)
+		flock = append(flock, qt.SW.query()...)
+	}
+
+	return flock
+}
+
 func (qt *qtNode) update() {
 	// Update all boids in current nod
-	for _, b := range qt.flock {
+	flock := qt.query()
+	for _, b := range flock {
 		b.flock(qt.flock)
 		b.Update()
 	}

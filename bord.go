@@ -14,6 +14,7 @@ func randomVec3(Max_x, Max_y float64) r3.Vector {
 	}
 }
 
+
 type boid struct {
 	position r3.Vector
 	velocity   r3.Vector
@@ -29,8 +30,9 @@ func (b *boid) isInFOV(other *boid) bool {
         return false
     }
 	myForward := b.velocity.Normalize()
-    toTargetNorm := other.position.Normalize()
-
+	raw := other.position.Sub(b.position)
+	toTargetNorm := raw.Normalize()
+  
 
     // Dot product to get cosine of the angle
     dot := toTargetNorm.Dot(myForward)
@@ -40,10 +42,7 @@ func (b *boid) isInFOV(other *boid) bool {
 
     return dot >= cosFOV // Inside FOV if the dot product is greater than the threshold
 }
-// What should boid have:
-// 	initial position
-// 	initial velocity
-// 	initial accelration
+
 func Newboid(MaxHeight float64,MaxWidth float64) *boid{
 	return &boid{
 		position: randomVec3(MaxHeight,MaxWidth),
@@ -52,10 +51,15 @@ func Newboid(MaxHeight float64,MaxWidth float64) *boid{
 	}
 }
 
+func (b *boid) checkCollision(other *boid) bool {
+	return b.position.Distance(other.position) < float64(radius*2)
+}
+
 func (b *boid) Update() {
     b.position = b.position.Add(b.velocity)
     b.velocity = b.velocity.Add(b.accelration)
     speed := b.velocity.Norm()
+
     b.edge(screenWidth, screenHeight)
 
     if speed > maxVelocity {
@@ -95,14 +99,6 @@ func (b *boid) edge(screenWidth, screenHeight int) {
     b.position.X = wrap(b.position.X, width)
     b.position.Y = wrap(b.position.Y, height)
 }
-func populate(number int,MaxHeight float64,MaxWidth float64) []*boid{
-	population := make([]*boid, number)
-	for i := 0; i < number; i++ {
-		population[i] = Newboid(MaxHeight, MaxWidth)
-	}
-	return population
-}
-
 
 func qt_populate(number int,MaxHeight float64,MaxWidth float64) *qtNode{
 	root := createNode(boundary{
@@ -121,101 +117,105 @@ func (b *boid) checkNode() bool{
 	return b.curr_node.boundary.contains(int(b.position.X),int(b.position.Y))
 }
 
-func (b *boid) steer(flock []*boid) r3.Vector{
-
-	desired := r3.NewPreciseVector(0,0,0).Vector()
-	steer := r3.NewPreciseVector(0,0,0).Vector()
-	
-	count := 0
-	for _,other := range flock{
-		if b.isInFOV(other){
-		// if b.isInFOV(other){
-			desired = desired.Add(other.velocity)
-			count++
-		}
-	}
-	if count > 0 {
-		div := 1.0 / float64(count) // Ensure non-zero count
-		desired = desired.Mul(div)
-
-		// Normalize desired velocity
-		if desired.Norm() > 0 {
-			desired = desired.Mul(maxVelocity/ desired.Norm()) // Adjust to maxSpeed
-		}
-
-		steer = desired.Sub(b.velocity) // Calculate steering force
-
-		// Limit the steering force
-		if steer.Norm() > float64(maxAlignmentForce) {
-			steer = steer.Mul(float64(maxAlignmentForce) / steer.Norm())
-		}
-	}
-	return steer
+func (b *boid) steer(flock []*boid) r3.Vector {
+    desired := r3.NewPreciseVector(0,0,0).Vector()
+    steer   := r3.NewPreciseVector(0,0,0).Vector()
+    
+    count := 0
+    for _, other := range flock {
+        if b.isInFOV(other) {
+            desired = desired.Add(other.velocity)
+            count++
+        }
+    }
+    if count > 0 {
+        div := 1.0 / float64(count)
+        desired = desired.Mul(div)                // average neighbor velocity
+        if desired.Norm() > 0 {
+            desired = desired.Mul(maxVelocity / desired.Norm()) // scale to maxVelocity
+        }
+        steer = desired.Sub(b.velocity)           // "steering force" = desired minus current
+        // clamp to maxAlignmentForce:
+        if steer.Norm() > float64(maxAlignmentForce) {
+            steer = steer.Mul(float64(maxAlignmentForce) / steer.Norm())
+        }
+    }
+    return steer
 }
 
-func (b *boid) cohesiveForce(flock []*boid) r3.Vector{
 
-	desired := r3.NewPreciseVector(0,0,0).Vector()
-	steer := r3.NewPreciseVector(0,0,0).Vector()
-	
-	count := 0
-	for _,other := range flock{
-		if other != b && b.position.Distance(other.position) <= float64(perception){
-			desired = desired.Add(other.velocity.Mul(-1.00))
-			count++
-		}
-	}
-	if count > 0 {
-		div := 1.0 / float64(count) // Ensure non-zero count
-		desired = desired.Mul(div)
+func (b *boid) cohesiveForce(flock []*boid) r3.Vector {
+    // 1. Sum neighbor positions
+    sumPos := r3.NewPreciseVector(0,0,0).Vector()
+    count  := 0
 
-		// Normalize desired velocity
-		if desired.Norm() > 0 {
-			desired = desired.Mul(maxVelocity/ desired.Norm()) // Adjust to maxSpeed
-		}
+    for _, other := range flock {
+        if other != b {
+            d := b.position.Distance(other.position)
+            if d <= float64(perception) {
+                sumPos = sumPos.Add(other.position)
+                count++
+            }
+        }
+    }
 
-		steer = desired.Sub(b.velocity) // Calculate steering force
+    if count == 0 {
+        return r3.NewPreciseVector(0,0,0).Vector() // no neighbors → no cohesion force
+    }
 
-		// Limit the steering force
-		if steer.Norm() > float64(MaxCohesiveFroce) {
-			steer = steer.Mul(float64(MaxCohesiveFroce) / steer.Norm())
-		}
-	}
-	return steer
+    // 2. Compute center of mass
+    centerOfMass := sumPos.Mul(1.0 / float64(count))
+
+    // 3. Desired direction = (centerOfMass − currentPosition), scaled to maxVelocity
+    desired := centerOfMass.Sub(b.position)
+    if desired.Norm() > 0 {
+        desired = desired.Mul(maxVelocity / desired.Norm())
+    } else {
+        // If the boid is exactly at the center of mass (rare), no steering needed
+        return r3.NewPreciseVector(0,0,0).Vector()
+    }
+
+    // 4. Steering force = desired – current velocity, clamped to MaxCohesiveFroce
+    steer := desired.Sub(b.velocity)
+    if steer.Norm() > float64(MaxCohesiveFroce) {
+        steer = steer.Mul(float64(MaxCohesiveFroce) / steer.Norm())
+    }
+    return steer
 }
 
-func (b *boid) seprativeForce(flock []*boid) r3.Vector{
 
-	desired := r3.NewPreciseVector(0,0,0).Vector()
-	steer := r3.NewPreciseVector(0,0,0).Vector()
-	count := 0
-	for _,other := range flock{
-		if other != b && b.position.Distance(other.position) <= float64(perception){
-			diff := b.position.Sub(other.position)
-			diff = diff.Mul(1.0/b.position.Distance(other.position))
-			desired = desired.Add(diff)
-			count++
-		}
-	}
-	if count > 0 {
-		div := 1.0 / float64(count) // Ensure non-zero count
-		desired = desired.Mul(div)
 
-		// Normalize desired velocity
-		if desired.Norm() > 0 {
-			desired = desired.Mul(maxVelocity/ desired.Norm()) // Adjust to maxVelocity
-		}
+func (b *boid) seprativeForce(flock []*boid) r3.Vector {
+    desired := r3.NewPreciseVector(0,0,0).Vector()
+    steer   := r3.NewPreciseVector(0,0,0).Vector()
+    count   := 0
 
-		steer = desired.Sub(b.velocity) // Calculate steering force
+    for _, other := range flock {
+        if other != b && b.position.Distance(other.position) <= float64(perception) {
+            // diff is a unit vector pointing from other → b, scaled by 1/distance
+            diff := b.position.Sub(other.position)
+            diff = diff.Mul(1.0 / b.position.Distance(other.position))
+            desired = desired.Add(diff)
+            count++
+        }
+    }
 
-		// Limit the steering force
-		if steer.Norm() > float64(maxSeprationForce) {
-			steer = steer.Mul(float64(maxSeprationForce) / steer.Norm())
-		}
-	}
-	return steer
+    if count > 0 {
+        invCount := 1.0 / float64(count)
+        desired = desired.Mul(invCount) // average push‐away vector
 
+        if desired.Norm() > 0 {
+            desired = desired.Mul(maxVelocity / desired.Norm())
+        }
+
+        steer = desired.Sub(b.velocity)
+        if steer.Norm() > float64(maxSeprationForce) {
+            steer = steer.Mul(float64(maxSeprationForce) / steer.Norm())
+        }
+    }
+    return steer
 }
+
 
 
 func (b *boid) flock(flock []*boid) {

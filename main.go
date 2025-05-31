@@ -9,7 +9,7 @@ import (
 const (
     screenWidth  = 800
     screenHeight = 600
-    maxVelocity  = 2.0
+    maxVelocity  = 1.0
 	// perception = 50
 	// maxAlignmentForce = 1
 	// MaxCohesiveFroce = 1
@@ -57,66 +57,8 @@ func main() {	// Initialize window
 
 
 
-// Update game logic
-func update(flock []*boid) {
-
-	for _,boid := range flock{
-		boid.flock(flock)
-		boid.Update()
-		
-	}
-}
 func update_qt(qt *qtNode){
 	qt.update()
-}
-
-// Draw everything
-func draw(flock []*boid) {
-	rl.DrawFPS(0,0)
-	maxAlignmentForce = gui.Slider(
-		rl.NewRectangle(600, 0, 200, 20),
-		"maxAlignmentForce", 
-		"", 
-		maxAlignmentForce, 
-		0.0, 
-		1.0,
-	)
-	MaxCohesiveFroce = gui.Slider(
-		rl.NewRectangle(600, 20, 200, 20),
-		"MaxCohesiveFroce", 
-		"", 
-		MaxCohesiveFroce, 
-		0.0, 
-		1.0,
-	)
-	maxSeprationForce = gui.Slider(
-		rl.NewRectangle(600, 40, 200, 20),
-		"maxSeprationForce", 
-		"", 
-		maxSeprationForce, 
-		0.0, 
-		1.0,
-	)
-	perception = gui.Slider(
-		rl.NewRectangle(600, 60, 200, 20),
-		"perception", 
-		"", 
-		perception, 
-		1.0, 
-		600.0,
-	)
-	FOV = gui.Slider(
-		rl.NewRectangle(600, 80, 200, 20),
-		"FOV", 
-		"", 
-		FOV, 
-		1.0, 
-		360.0,
-	)
-	for _,boid := range flock{
-		rl.DrawCircle(int32(boid.position.X),int32(boid.position.Y),float32(radius),rl.Black)
-	}
-
 }
 
 func draw_qt(qt *qtNode) {
@@ -162,5 +104,4 @@ func draw_qt(qt *qtNode) {
 		360.0,
 	)
 	qt.Draw()
-
 }
