@@ -141,11 +141,8 @@ func (qt *qtNode) query() []*boid {
 	flock := make([]*boid, 0)
 
 	// Check if current node's boundary intersects with the query area
-	for _, b := range qt.flock {
-		if qt.boundary.contains(int(b.position.X), int(b.position.Y))  {
-			flock = append(flock, b)
-		}
-	}
+
+	flock = append(flock, qt.flock...)
 
 	// If subdivided, check children recursively
 	if qt.divided {
@@ -160,11 +157,7 @@ func (qt *qtNode) query() []*boid {
 
 func (qt *qtNode) update() {
 	// Update all boids in current nod
-	flock := qt.query()
-	for _, b := range flock {
-		b.flock(qt.flock)
-		b.Update()
-	}
+
 	// Update children recursively
 	if qt.divided {
 		qt.NE.update()
@@ -176,6 +169,11 @@ func (qt *qtNode) update() {
 	// Cleanup empty subdivisions
 	if qt.divided && qt.isEmpty() {
 		qt.merge()
+	}
+	flock := qt.query()
+	for _, b := range flock {
+		b.flock(qt.flock)
+		b.Update()
 	}
 }
 

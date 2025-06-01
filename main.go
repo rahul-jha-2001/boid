@@ -19,10 +19,10 @@ const (
 	boidPerQT = 10
 )
 
-var maxAlignmentForce float32 = float32(0.5) // Initial slider value
-var MaxCohesiveFroce float32= float32(0.5) // Initial slider value
-var maxSeprationForce float32= float32(0.5) // Initial slider value
-var perception float32 = 2
+var maxAlignmentForce float32 = float32(0) // Initial slider value
+var MaxCohesiveFroce float32= float32(0) // Initial slider value
+var maxSeprationForce float32= float32(0) // Initial slider value
+var perception float32 = 0
 var FOV float32 = 360.0 
 func main() {	// Initialize window
 	
@@ -69,7 +69,7 @@ func draw_qt(qt *qtNode) {
 		"", 
 		maxAlignmentForce, 
 		0.0, 
-		1.0,
+		10.0,
 	)
 	MaxCohesiveFroce = gui.Slider(
 		rl.NewRectangle(600, 20, 200, 20),
@@ -77,7 +77,7 @@ func draw_qt(qt *qtNode) {
 		"", 
 		MaxCohesiveFroce, 
 		0.0, 
-		1.0,
+		10.0,
 	)
 	maxSeprationForce = gui.Slider(
 		rl.NewRectangle(600, 40, 200, 20),
@@ -85,14 +85,14 @@ func draw_qt(qt *qtNode) {
 		"", 
 		maxSeprationForce, 
 		0.0, 
-		1.0,
+		10.0,
 	)
 	perception = gui.Slider(
 		rl.NewRectangle(600, 60, 200, 20),
 		"perception", 
 		"", 
 		perception, 
-		1.0, 
+		0.0, 
 		600.0,
 	)
 	FOV = gui.Slider(
@@ -100,7 +100,7 @@ func draw_qt(qt *qtNode) {
 		"FOV", 
 		"", 
 		FOV, 
-		1.0, 
+		0.0, 
 		360.0,
 	)
 	qt.Draw()
