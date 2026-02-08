@@ -1,0 +1,748 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Particle Viewer</title>
+  <style>
+    body { margin:0; font-family: system-ui; background:#0b0b12; color:#ddd; }
+    #wrap { display:flex; height:100vh; }
+    #ui { width:260px; padding:12px; background:#121222; border-left:1px solid #24243a; }
+    canvas { flex:1; display:block; }
+    label { display:block; margin-top:10px; font-size:12px; opacity:0.9; }
+    input { width:100%; }
+    .hint { font-size:12px; opacity:0.8; margin-top:10px; line-height:1.3; }
+    button { width:100%; margin-top:12px; padding:10px; background:#1c1c33; color:#ddd; border:1px solid #333; border-radius:8px; cursor:pointer; }
+    button:hover { background:#26264a; }
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div id="ui">
+    <button id="toggle">Pause</button>
+    <button id="resetBtn" style="background:#3a6b3a;">Reset</button>
+
+    <div style="display:flex; align-items:center; justify-content:space-between;">
+      <div><b>Emitters</b></div>
+      <button id="emittersToggle" style="width:36px; height:28px; padding:0;">▾</button>
+    </div>
+    <div id="emittersContainer">
+      <button id="addEmitterBtn">+ Add Emitter</button>
+      <div id="emitterList"></div>
+    </div>
+
+    <hr style="border-color:#222; margin:10px 0;">
+    <div><b>Phased Array</b></div>
+    <label style="font-size:12px; margin-top:6px;">Base ID: <input id="arrayBaseId" type="number" value="100" style="width:80px;" /></label>
+    <label style="font-size:12px; margin-top:6px;">Count: <input id="arrayCount" type="number" value="8" style="width:80px;" /></label>
+    <label style="font-size:12px; margin-top:6px;">Spacing: <input id="arraySpacing" type="number" value="20" style="width:80px;" /></label>
+    <label style="font-size:12px; margin-top:6px;">Radius: <input id="arrayRadius" type="number" value="120" style="width:80px;" /></label>
+    <label style="font-size:12px; margin-top:6px;">Amp: <input id="arrayAmp" type="number" value="1000" style="width:80px;" /></label>
+    <label style="font-size:12px; margin-top:6px;">Freq: <input id="arrayFreq" type="number" value="2" step="0.1" style="width:80px;" /></label>
+    <button id="createArrayBtn">Create Array</button>
+
+    <label style="display:block; margin-top:8px;"><input id="showPhaseChk" type="checkbox" /> Show phase overlay</label>
+    <label style="display:block; margin-top:6px;">Preset: <select id="arrayPreset" style="width:140px;">
+      <option value="demo">Demo Narrow Beam</option>
+      <option value="lowc">Visible Beam (low c)</option>
+      <option value="wide">Wide Beam</option>
+    </select></label>
+    <button id="applyPresetBtn" style="margin-top:6px;">Apply Preset</button>
+
+    <div style="margin-top:8px;"><b>Steering</b></div>
+    <label style="font-size:12px; margin-top:6px;">Center X: <input id="steerCx" type="number" value="250" style="width:80px;" /></label>
+    <label style="font-size:12px; margin-top:6px;">Spacing: <input id="steerSpacing" type="number" value="20" style="width:80px;" /></label>
+    <label style="font-size:12px; margin-top:6px;">Freq: <input id="steerFreq" type="number" value="2" step="0.1" style="width:80px;" /></label>
+    <label style="font-size:12px; margin-top:6px;">Wave speed c: <input id="steerC" type="number" value="340" style="width:80px;" /></label>
+    <label style="display:block; margin-top:6px;">Angle: <input id="steerAngle" type="range" min="-180" max="180" value="0" style="width:100%;" /></label>
+    <button id="steerArrayBtn">Steer Array</button>
+
+    <div class="hint">
+      - Click emitter row to select<br/>
+      - Drag selected emitter on canvas<br/>
+      - Canvas rendering: Canvas 2D (10k)<br/>
+    </div>
+  </div>
+</div>
+
+<script>
+
+let paused = false;
+const toggleBtn = document.getElementById('toggle');
+const resetBtn = document.getElementById('resetBtn');
+const addEmitterBtn = document.getElementById('addEmitterBtn');
+const emitterListEl = document.getElementById('emitterList');
+
+function sendPaused() {
+  const buf = new ArrayBuffer(2);
+  const dv = new DataView(buf);
+  dv.setUint8(0, 0x05);              // CmdSetPaused
+  dv.setUint8(1, paused ? 1 : 0);
+  ws.send(buf);
+}
+
+function sendReset() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const buf = new ArrayBuffer(1);
+  const dv = new DataView(buf);
+  dv.setUint8(0, 0x0C);              // CmdReset
+  ws.send(buf);
+}
+
+toggleBtn.addEventListener('click', () => {
+  paused = !paused;
+  toggleBtn.textContent = paused ? "Play" : "Pause";
+  sendPaused();
+});
+
+resetBtn.addEventListener('click', () => {
+  sendReset();
+  emitters.clear();
+  arrays.clear();
+  selectedEmitterId = null;
+  selectedArrayId = null;
+  updateEmitterList();
+});
+
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+function resize() {
+  canvas.width = window.innerWidth - 260;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+let ws;
+let particles = null;
+let n = 0;
+
+// Array class
+class ParticleArray {
+  constructor(baseID, count, cx, cy, spacing, radius, amp, freq) {
+    this.baseID = baseID;
+    this.count = count;
+    this.spacing = spacing;
+    this.radius = radius;
+    this.emitterIds = [];
+    
+    // Create emitters in a horizontal line
+    const startX = cx - spacing * (count - 1) / 2;
+    const colors = ['#5aff5a', '#ff5a5a', '#5a5aff', '#ffff5a', '#ff5aff', '#5affff'];
+    
+    for (let i = 0; i < count; i++) {
+      const id = baseID + i;
+      const x = startX + i * spacing;
+      const y = cy;
+      const color = colors[i % colors.length];
+      emitters.set(id, {
+        x, y, amp, freq, phase: 0, radius, color, enabled: true, savedAmp: amp
+      });
+      this.emitterIds.push(id);
+    }
+  }
+  
+  moveBy(dx, dy) {
+    this.emitterIds.forEach(id => {
+      const em = emitters.get(id);
+      if (em) {
+        em.x += dx;
+        em.y += dy;
+        sendMoveEmitter(id, em.x, em.y);
+      }
+    });
+  }
+  
+  getCenter() {
+    if (this.emitterIds.length === 0) return {x: 0, y: 0};
+    let sumX = 0, sumY = 0;
+    this.emitterIds.forEach(id => {
+      const em = emitters.get(id);
+      if (em) {
+        sumX += em.x;
+        sumY += em.y;
+      }
+    });
+    return {x: sumX / this.emitterIds.length, y: sumY / this.emitterIds.length};
+  }
+  
+  delete() {
+    this.emitterIds.forEach(id => {
+      emitters.delete(id);
+      sendDeleteEmitter(id);
+    });
+  }
+}
+
+// Emitter management
+const emitters = new Map(); // id -> {x, y, amp, freq, phase, radius, color, enabled, savedAmp}
+const arrays = new Map(); // baseID -> ParticleArray
+let nextEmitterId = 1;
+let selectedEmitterId = null;
+let selectedArrayId = null;
+let draggingEmitterId = null;
+let draggingArrayId = null;
+let dragOffsetX = 0;
+let dragOffsetY = 0;
+
+function connect() {
+  ws = new WebSocket("ws://localhost:8080/ws");
+  ws.binaryType = "arraybuffer";
+
+  ws.onopen = () => {
+    sendPaused();
+  };
+
+  ws.onmessage = (ev) => {
+    const buf = ev.data;
+    const dv = new DataView(buf);
+    const type = dv.getUint8(0);
+    if (type !== 0x10) return;
+
+    n = dv.getUint32(5, true);
+    particles = dv;
+    render();
+  };
+
+  ws.onclose = () => setTimeout(connect, 500);
+}
+connect();
+
+// Emitter command builders
+function sendAddEmitter(id, x, y, amp, freq, phase, radius) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const buf = new ArrayBuffer(1 + 4 + 6*4);
+  const dv = new DataView(buf);
+  dv.setUint8(0, 0x08);
+  dv.setUint32(1, id, true);
+  dv.setFloat32(5, x, true);
+  dv.setFloat32(9, y, true);
+  dv.setFloat32(13, amp, true);
+  dv.setFloat32(17, freq, true);
+  dv.setFloat32(21, phase, true);
+  dv.setFloat32(25, radius, true);
+  ws.send(buf);
+}
+
+function sendMoveEmitter(id, x, y) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const buf = new ArrayBuffer(1 + 4 + 2*4);
+  const dv = new DataView(buf);
+  dv.setUint8(0, 0x0A);
+  dv.setUint32(1, id, true);
+  dv.setFloat32(5, x, true);
+  dv.setFloat32(9, y, true);
+  ws.send(buf);
+}
+
+function sendSetEmitterWave(id, amp, freq, phase) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const buf = new ArrayBuffer(1 + 4 + 3*4);
+  const dv = new DataView(buf);
+  dv.setUint8(0, 0x0B);
+  dv.setUint32(1, id, true);
+  dv.setFloat32(5, amp, true);
+  dv.setFloat32(9, freq, true);
+  dv.setFloat32(13, phase, true);
+  ws.send(buf);
+}
+
+function sendDeleteEmitter(id) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const buf = new ArrayBuffer(1 + 4);
+  const dv = new DataView(buf);
+  dv.setUint8(0, 0x09);
+  dv.setUint32(1, id, true);
+  ws.send(buf);
+}
+
+function sendCreateArray(baseID, count, cx, cy, spacing, radius, amp, freq) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const buf = new ArrayBuffer(1 + 4 + 4 + 6*4);
+  const dv = new DataView(buf);
+  dv.setUint8(0, 0x0D); // CmdCreateArray
+  dv.setUint32(1, baseID, true);
+  dv.setUint32(5, count, true);
+  dv.setFloat32(9, cx, true);
+  dv.setFloat32(13, cy, true);
+  dv.setFloat32(17, spacing, true);
+  dv.setFloat32(21, radius, true);
+  dv.setFloat32(25, amp, true);
+  dv.setFloat32(29, freq, true);
+  ws.send(buf);
+}
+
+function sendSteerArray(baseID, count, cx, spacing, freq, c, thetaRad) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const buf = new ArrayBuffer(1 + 4 + 4 + 5*4);
+  const dv = new DataView(buf);
+  dv.setUint8(0, 0x0E); // CmdSteerArray
+  dv.setUint32(1, baseID, true);
+  dv.setUint32(5, count, true);
+  dv.setFloat32(9, cx, true);
+  dv.setFloat32(13, spacing, true);
+  dv.setFloat32(17, freq, true);
+  dv.setFloat32(21, c, true);
+  dv.setFloat32(25, thetaRad, true);
+  ws.send(buf);
+}
+
+// Array commands
+document.getElementById('createArrayBtn').addEventListener('click', () => {
+  const baseID = parseInt(document.getElementById('arrayBaseId').value, 10) || 100;
+  const count = parseInt(document.getElementById('arrayCount').value, 10) || 8;
+  const spacing = parseFloat(document.getElementById('arraySpacing').value) || 20;
+  const radius = parseFloat(document.getElementById('arrayRadius').value) || 120;
+  const amp = parseFloat(document.getElementById('arrayAmp').value) || 1000;
+  const freq = parseFloat(document.getElementById('arrayFreq').value) || 2;
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  
+  // Create array object
+  const arr = new ParticleArray(baseID, count, cx, cy, spacing, radius, amp, freq);
+  arrays.set(baseID, arr);
+  
+  // Send create array command and add emitter commands for each
+  sendCreateArray(baseID, count, cx, cy, spacing, radius, amp, freq);
+  arr.emitterIds.forEach(id => {
+    const em = emitters.get(id);
+    sendAddEmitter(id, em.x, em.y, em.amp, em.freq, em.phase, em.radius);
+  });
+  
+  selectedArrayId = baseID;
+  selectedEmitterId = null;
+  updateEmitterList();
+});
+function updateEmitterList() {
+  emitterListEl.innerHTML = '';
+  
+  // Display arrays first
+  arrays.forEach((arr, baseID) => {
+    const arrayRow = document.createElement('div');
+    arrayRow.style.padding = '10px';
+    arrayRow.style.marginTop = '8px';
+    arrayRow.style.background = selectedArrayId === baseID ? '#2a4a5a' : '#1c2a33';
+    arrayRow.style.border = '2px solid ' + (selectedArrayId === baseID ? '#4a9aff' : '#444');
+    arrayRow.style.borderRadius = '6px';
+    arrayRow.style.cursor = 'pointer';
+    arrayRow.style.userSelect = 'none';
+    
+    const header = document.createElement('div');
+    header.style.fontSize = '13px';
+    header.style.fontWeight = 'bold';
+    header.style.marginBottom = '6px';
+    header.style.color = '#5aff5a';
+    const center = arr.getCenter();
+    header.textContent = `Array ID ${baseID}: (${Math.round(center.x)}, ${Math.round(center.y)}) - ${arr.count} emitters`;
+    
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '✕ Delete Array';
+    delBtn.style.width = '100%';
+    delBtn.style.marginTop = '6px';
+    delBtn.style.padding = '4px';
+    delBtn.style.background = '#8b3a3a';
+    delBtn.style.color = '#ddd';
+    delBtn.style.border = '1px solid #555';
+    delBtn.style.borderRadius = '4px';
+    delBtn.style.cursor = 'pointer';
+    delBtn.style.fontSize = '11px';
+    delBtn.addEventListener('click', (evt) => {
+      evt.stopPropagation();
+      arr.delete();
+      arrays.delete(baseID);
+      if (selectedArrayId === baseID) selectedArrayId = null;
+      updateEmitterList();
+    });
+    
+    arrayRow.appendChild(header);
+    arrayRow.appendChild(delBtn);
+    
+    arrayRow.addEventListener('click', () => {
+      selectedArrayId = baseID;
+      selectedEmitterId = null;
+      updateEmitterList();
+    });
+    
+    emitterListEl.appendChild(arrayRow);
+  });
+  
+  // Display individual emitters
+  emitters.forEach((e, id) => {
+    // Skip if this emitter is part of an array
+    let isInArray = false;
+    arrays.forEach(arr => {
+      if (arr.emitterIds.includes(id)) {
+        isInArray = true;
+      }
+    });
+    if (isInArray) return;
+    
+    const row = document.createElement('div');
+    row.style.padding = '8px';
+    row.style.marginTop = '5px';
+    row.style.background = selectedEmitterId === id ? '#26264a' : '#1c1c33';
+    row.style.border = '1px solid #333';
+    row.style.borderRadius = '4px';
+    row.style.cursor = 'pointer';
+    row.style.userSelect = 'none';
+
+    const headerDiv = document.createElement('div');
+    headerDiv.style.display = 'flex';
+    headerDiv.style.justifyContent = 'space-between';
+    headerDiv.style.alignItems = 'center';
+    headerDiv.style.marginBottom = '4px';
+
+    const info = document.createElement('div');
+    info.textContent = `ID ${id}: (${Math.round(e.x)}, ${Math.round(e.y)})`;
+    info.style.fontSize = '12px';
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.textContent = e.enabled ? '✓' : '○';
+    toggleBtn.style.width = '24px';
+    toggleBtn.style.height = '24px';
+    toggleBtn.style.padding = '0';
+    toggleBtn.style.background = e.enabled ? '#2a8a2a' : '#8a2a2a';
+    toggleBtn.style.color = '#ddd';
+    toggleBtn.style.border = '1px solid #555';
+    toggleBtn.style.borderRadius = '4px';
+    toggleBtn.style.cursor = 'pointer';
+    toggleBtn.style.fontSize = '12px';
+    toggleBtn.addEventListener('click', (evt) => {
+      evt.stopPropagation();
+      e.enabled = !e.enabled;
+      const ampToSend = e.enabled ? e.savedAmp : 0;
+      sendSetEmitterWave(id, ampToSend, e.freq, e.phase);
+      if (e.enabled) {
+        e.amp = e.savedAmp;
+      } else {
+        e.savedAmp = e.amp;
+        e.amp = 0;
+      }
+      updateEmitterList();
+    });
+
+    headerDiv.appendChild(info);
+    headerDiv.appendChild(toggleBtn);
+
+    const controls = document.createElement('div');
+    controls.style.fontSize = '11px';
+    controls.style.marginBottom = '4px';
+    controls.innerHTML = `
+      <label style="display:block; margin:2px 0;"><input type="range" min="0" max="5000" value="${e.amp}" style="width:100%;" /> Amp: ${Math.round(e.amp)}</label>
+      <label style="display:block; margin:2px 0;"><input type="range" min="0.1" max="10" step="0.1" value="${e.freq}" style="width:100%;" /> Freq: ${e.freq.toFixed(1)}</label>
+      <label style="display:block; margin:2px 0;"><input type="range" min="-3.1416" max="3.1416" step="0.1" value="${e.phase}" style="width:100%;" /> Phase: ${e.phase.toFixed(2)}</label>
+      <label style="display:block; margin:2px 0;"><input type="range" min="10" max="500" value="${e.radius}" style="width:100%;" /> Radius: ${Math.round(e.radius)}</label>
+    `;
+
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '✕ Delete';
+    delBtn.style.width = '100%';
+    delBtn.style.marginTop = '4px';
+    delBtn.style.padding = '4px';
+    delBtn.style.background = '#8b3a3a';
+    delBtn.style.color = '#ddd';
+    delBtn.style.border = '1px solid #555';
+    delBtn.style.borderRadius = '4px';
+    delBtn.style.cursor = 'pointer';
+    delBtn.style.fontSize = '11px';
+    delBtn.addEventListener('click', (evt) => {
+      evt.stopPropagation();
+      emitters.delete(id);
+      if (selectedEmitterId === id) selectedEmitterId = null;
+      sendDeleteEmitter(id);
+      updateEmitterList();
+    });
+
+    row.appendChild(headerDiv);
+    row.appendChild(controls);
+    row.appendChild(delBtn);
+
+    row.addEventListener('click', () => {
+      selectedEmitterId = id;
+      selectedArrayId = null;
+      updateEmitterList();
+    });
+
+    // Add input listeners for parameters
+    const inputs = controls.querySelectorAll('input');
+    inputs[0].addEventListener('input', (evt) => {
+      e.amp = +evt.target.value;
+      if (e.enabled) {
+        e.savedAmp = e.amp;
+      }
+      sendSetEmitterWave(id, e.amp, e.freq, e.phase);
+      updateEmitterList();
+    });
+    inputs[1].addEventListener('input', (evt) => {
+      e.freq = +evt.target.value;
+      sendSetEmitterWave(id, e.amp, e.freq, e.phase);
+      updateEmitterList();
+    });
+    inputs[2].addEventListener('input', (evt) => {
+      e.phase = +evt.target.value;
+      sendSetEmitterWave(id, e.amp, e.freq, e.phase);
+      updateEmitterList();
+    });
+    inputs[3].addEventListener('input', (evt) => {
+      e.radius = +evt.target.value;
+      sendAddEmitter(id, e.x, e.y, e.amp, e.freq, e.phase, e.radius);
+      updateEmitterList();
+    });
+
+    emitterListEl.appendChild(row);
+  });
+}
+
+addEmitterBtn.addEventListener('click', () => {
+  const id = nextEmitterId++;
+  const x = canvas.width / 2 + Math.random() * 100 - 50;
+  const y = canvas.height / 2 + Math.random() * 100 - 50;
+  
+  const colors = ['#5aff5a', '#ff5a5a', '#5a5aff', '#ffff5a', '#ff5aff', '#5affff'];
+  const color = colors[emitters.size % colors.length];
+
+  emitters.set(id, {x, y, amp: 1000, freq: 2, phase: 0, radius: 200, color, enabled: true, savedAmp: 1000});
+  
+  sendAddEmitter(id, x, y, 1000, 2, 0, 200);
+  selectedEmitterId = id;
+  updateEmitterList();
+});
+
+// Emitters container toggle
+const emittersToggle = document.getElementById('emittersToggle');
+const emittersContainer = document.getElementById('emittersContainer');
+let emittersHidden = false;
+emittersToggle.addEventListener('click', () => {
+  emittersHidden = !emittersHidden;
+  emittersContainer.style.display = emittersHidden ? 'none' : 'block';
+  emittersToggle.textContent = emittersHidden ? '▸' : '▾';
+});
+
+document.getElementById('steerArrayBtn').addEventListener('click', () => {
+  const baseID = parseInt(document.getElementById('arrayBaseId').value, 10) || 100;
+  const count = parseInt(document.getElementById('arrayCount').value, 10) || 8;
+  const cx = parseFloat(document.getElementById('steerCx').value) || canvas.width/2;
+  const spacing = parseFloat(document.getElementById('steerSpacing').value) || 20;
+  const freq = parseFloat(document.getElementById('steerFreq').value) || 2;
+  const c = parseFloat(document.getElementById('steerC').value) || 340;
+  const angleDeg = parseFloat(document.getElementById('steerAngle').value) || 0;
+  const theta = angleDeg * Math.PI / 180.0;
+  sendSteerArray(baseID, count, cx, spacing, freq, c, theta);
+  // Update local emitter phases so UI reflects steering immediately
+  const n = count;
+  const lambda = c / freq;
+  const k = 2 * Math.PI / lambda;
+  const startX = cx - spacing*(n-1)/2;
+  for (let i = 0; i < n; i++) {
+    const id = baseID + i;
+    const x = startX + i*spacing;
+    const dx = x - cx;
+    const phase = -k * dx * Math.sin(theta);
+    const em = emitters.get(id);
+    if (em) {
+      em.phase = phase;
+    }
+  }
+  updateEmitterList();
+});
+
+// Phase overlay and presets
+const showPhaseChk = document.getElementById('showPhaseChk');
+let showPhase = false;
+showPhaseChk.addEventListener('change', () => { showPhase = showPhaseChk.checked; render(); });
+
+document.getElementById('applyPresetBtn').addEventListener('click', () => {
+  const preset = document.getElementById('arrayPreset').value;
+  if (preset === 'demo') {
+    document.getElementById('arrayFreq').value = '20';
+    document.getElementById('arraySpacing').value = '10';
+    document.getElementById('arrayCount').value = '16';
+    document.getElementById('arrayRadius').value = '50';
+    document.getElementById('arrayAmp').value = '2000';
+    document.getElementById('steerC').value = '340';
+  } else if (preset === 'lowc') {
+    document.getElementById('arrayFreq').value = '5';
+    document.getElementById('arraySpacing').value = '20';
+    document.getElementById('arrayCount').value = '12';
+    document.getElementById('arrayRadius').value = '80';
+    document.getElementById('arrayAmp').value = '1500';
+    document.getElementById('steerC').value = '50';
+  } else if (preset === 'wide') {
+    document.getElementById('arrayFreq').value = '2';
+    document.getElementById('arraySpacing').value = '20';
+    document.getElementById('arrayCount').value = '8';
+    document.getElementById('arrayRadius').value = '200';
+    document.getElementById('arrayAmp').value = '1000';
+    document.getElementById('steerC').value = '340';
+  }
+});
+
+canvas.addEventListener('mousedown', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  
+  // Check if dragging a selected array
+  if (selectedArrayId) {
+    const arr = arrays.get(selectedArrayId);
+    if (arr) {
+      const center = arr.getCenter();
+      if (Math.hypot(mx - center.x, my - center.y) < 50) {
+        draggingArrayId = selectedArrayId;
+        dragOffsetX = mx - center.x;
+        dragOffsetY = my - center.y;
+        return;
+      }
+    }
+  }
+  
+  // Check if dragging a selected emitter
+  if (selectedEmitterId) {
+    const em = emitters.get(selectedEmitterId);
+    if (em && Math.hypot(mx - em.x, my - em.y) < 20) {
+      draggingEmitterId = selectedEmitterId;
+      dragOffsetX = mx - em.x;
+      dragOffsetY = my - em.y;
+    }
+  }
+});
+
+window.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  if (draggingArrayId) {
+    const arr = arrays.get(draggingArrayId);
+    if (arr) {
+      const center = arr.getCenter();
+      // Target position based on constant offset from click
+      const targetX = mx - dragOffsetX;
+      const targetY = my - dragOffsetY;
+      // Displacement to move the center to target
+      const dx = targetX - center.x;
+      const dy = targetY - center.y;
+      arr.moveBy(dx, dy);
+      render();
+    }
+    return;
+  }
+
+  if (!draggingEmitterId) return;
+  const em = emitters.get(draggingEmitterId);
+  if (!em) {
+    draggingEmitterId = null;
+    return;
+  }
+  em.x = mx;
+  em.y = my;
+  sendMoveEmitter(draggingEmitterId, em.x, em.y);
+});
+
+window.addEventListener('mouseup', () => {
+  draggingEmitterId = null;
+  draggingArrayId = null;
+});
+
+function render() {
+  if (!particles) return;
+
+  ctx.fillStyle = '#0b0b12';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Draw particles
+  let off = 9;
+  ctx.fillStyle = '#d9d9ef';
+  for (let i = 0; i < n; i++) {
+    const x = particles.getFloat32(off, true); off += 4;
+    const y = particles.getFloat32(off, true); off += 4;
+    const r = particles.getFloat32(off, true); off += 4;
+    ctx.fillRect(x, y, Math.max(1, r*0.7), Math.max(1, r*0.7));
+  }
+
+  // Draw arrays first (as groups)
+  arrays.forEach((arr, baseID) => {
+    const center = arr.getCenter();
+    
+    // Draw array boundary
+    if (selectedArrayId === baseID) {
+      ctx.strokeStyle = '#4a9aff';
+      ctx.lineWidth = 2;
+      const minX = Math.min(...arr.emitterIds.map(id => emitters.get(id).x));
+      const maxX = Math.max(...arr.emitterIds.map(id => emitters.get(id).x));
+      const minY = Math.min(...arr.emitterIds.map(id => emitters.get(id).y));
+      const maxY = Math.max(...arr.emitterIds.map(id => emitters.get(id).y));
+      const w = maxX - minX + 20;
+      const h = maxY - minY + 20;
+      ctx.strokeRect(minX - 10, minY - 10, w, h);
+    }
+    
+    // Draw array emitters
+    arr.emitterIds.forEach(id => {
+      const e = emitters.get(id);
+      if (!e) return;
+      
+      // Phase overlay
+      if (showPhase) {
+        const t = performance.now() / 1000;
+        const phase = (e.phase || 0) + 2 * Math.PI * (e.freq || 0) * t;
+        let p = phase % (2 * Math.PI);
+        if (p < 0) p += 2 * Math.PI;
+        const hue = (p / (2 * Math.PI)) * 360;
+        ctx.fillStyle = `hsla(${hue},80%,60%,0.10)`;
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, Math.max(10, e.radius || 40), 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.fillStyle = e.color;
+      if (!e.enabled) {
+        ctx.globalAlpha = 0.3;
+      }
+      ctx.fillRect(e.x - 4, e.y - 4, 8, 8);
+      ctx.globalAlpha = 1.0;
+    });
+  });
+
+  // Draw individual emitters (not part of arrays)
+  emitters.forEach((e, id) => {
+    // Skip if this emitter is part of an array
+    let isInArray = false;
+    arrays.forEach(arr => {
+      if (arr.emitterIds.includes(id)) {
+        isInArray = true;
+      }
+    });
+    if (isInArray) return;
+    
+    // Phase overlay
+    if (showPhase) {
+      const t = performance.now() / 1000;
+      const phase = (e.phase || 0) + 2 * Math.PI * (e.freq || 0) * t;
+      let p = phase % (2 * Math.PI);
+      if (p < 0) p += 2 * Math.PI;
+      const hue = (p / (2 * Math.PI)) * 360;
+      ctx.fillStyle = `hsla(${hue},80%,60%,0.10)`;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, Math.max(10, e.radius || 40), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = e.color;
+    if (!e.enabled) {
+      ctx.globalAlpha = 0.3;
+    }
+    ctx.fillRect(e.x - 4, e.y - 4, 8, 8);
+    ctx.globalAlpha = 1.0;
+    
+    // Highlight selected
+    if (selectedEmitterId === id) {
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(e.x - 5, e.y - 5, 10, 10);
+    }
+  });
+}
+</script>
